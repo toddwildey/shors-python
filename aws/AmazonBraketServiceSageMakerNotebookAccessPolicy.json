@@ -1,0 +1,34 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::amazon-braket-*",
+                "arn:aws:s3:::braketnotebookcdk-*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogStream",
+                "logs:DescribeLogStreams",
+                "logs:PutLogEvents",
+                "logs:CreateLogGroup"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:*:log-group:/aws/sagemaker/*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": "braket:*",
+            "Resource": "*"
+        }
+    ]
+}
