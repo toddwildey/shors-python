@@ -1,6 +1,5 @@
 # AWS imports: Import Braket SDK modules
 import boto3
-import math
 import time
 
 from typing import Iterable, List
@@ -14,106 +13,26 @@ from braket.circuits.qubit_set import QubitSet, QubitSetInput
 from braket.devices import LocalSimulator
 from braket.aws import AwsSession, AwsDevice
 
+from utils import \
+    modInverse, \
+    addToCircuit, \
+    invertInstruction, \
+    invertInstructions, \
+    setCircuitBits, \
+    getNumberAsBits, \
+    getNumberFromBitString, \
+    QFT
+
 # aws_account_id = boto3.client("sts").get_caller_identity()["Account"]
 # s3_folder = (f"braket-output-{aws_account_id}", "RIGETTI")
 # device = AwsDevice("arn:aws:braket:::device/qpu/rigetti/Aspen-8")
 device = LocalSimulator()
 
-################################################################################
-#                                                                               
-#                               Utility methods                                 
-#                                                                               
-################################################################################
-
-# Copied from https://www.geeksforgeeks.org/multiplicative-inverse-under-modulo-m/
-def modInverse(a, modulus):
-    initial_modulus = modulus
-    t = 0
-    s = 1
-
-    while a > 1:
-        quotient = a // modulus
-        prev_modulus = modulus 
-
-        modulus = a % modulus
-        a = prev_modulus
-        prev_modulus = t
-
-        t = s - quotient * t 
-        s = prev_modulus
-
-    if s < 0:
-        s = s + initial_modulus 
-
-    return s 
-
-def addToCircuit(circuit: Circuit, instruction: Instruction):
-    if instruction is not None:
-        circuit.add(instruction)
-
-def invertInstruction(instruction: Instruction) -> Instruction:
-    if instruction is None:
-        return None
-
-    operator = instruction.operator
-    target = instruction.target
-    if isinstance(operator, Gate.PhaseShift):
-        return Instruction(Gate.PhaseShift(-operator.angle()), target = target)
-    elif isinstance(operator, Gate.CNot):
-        return Instruction(Gate.CNot(), target = target)
-    elif isinstance(operator, Gate.CCNot):
-        return Instruction(Gate.CCNot(), target = target)
-    elif isinstance(operator, Gate.X):
-        return Instruction(Gate.X(), target = target)
-    elif isinstance(operator, Gate.CSwap):
-        return Instruction(Gate.CSwap(), target = target)
-    else:
-        raise ValueError("Invalid operator type within instruction passed to invertInstruction")
-
-def invertInstructions(instructions: Iterable[Instruction]) -> Iterable[Instruction]:
-    def _flatten(other):
-        if isinstance(other, Iterable) and not isinstance(other, str):
-            for item in other:
-                yield from _flatten(item)
-        else:
-            yield other
-
-    return [ invertInstruction(instruction) for instruction in reversed(list(_flatten(instructions))) ]
-
-def setCircuitBits(circuit: Circuit, bit_list: Iterable[int], offset: int) -> Circuit:
-    for idx in range(len(bit_list)):
-        if bit_list[idx] > 0:
-            circuit.x(offset + idx)
-
-    return circuit
-
-def getNumberAsBits(number: int):
-    bit_list = []
-
-    while number > 0:
-        bit_list.append(number % 2)
-        number = math.floor(number / 2)
-
-    return bit_list
-
-def getNumberFromBitString(bit_string: str, num_digits: int, offset: int) -> int:
-    bit_list = bit_string[offset:offset + num_digits]
-
-    number = 0
-    current_power = 1
-    for idx in range(len(bit_list)):
-        if bit_list[idx] == '1':
-            number += current_power
-
-        current_power *= 2
-
-    return number
-
-################################################################################
+###############################################################################
 #                                                                               
 #                                Gates & Circuits                               
 #                                                                               
-################################################################################
+###############################################################################
 """
 Method `Carry` represents a carry sub-circuit for an adder.
 
@@ -320,9 +239,9 @@ def ModAdder(
     return circuit
 
 def buildTestModAdderCircuit(addend1_int, addend2_int, modulus_int, bits_per_number):
-    addend1_bits = getNumberAsBits(addend1_int)
-    addend2_bits = getNumberAsBits(addend2_int)
-    modulus_bits = getNumberAsBits(modulus_int)
+    addend1_bits = getNumberAsBits(addend1_int, bits_per_number)
+    addend2_bits = getNumberAsBits(addend2_int, bits_per_number)
+    modulus_bits = getNumberAsBits(modulus_int, bits_per_number)
 
     circuit = Circuit()
 
@@ -349,12 +268,37 @@ def buildTestModAdderCircuit(addend1_int, addend2_int, modulus_int, bits_per_num
 
     return circuit
 
+def testAllInputsModAdder(bits_per_number = 3):
+    for modulus in range(3, (2 ** bits_per_number) - 1):
+        for addend1 in range(modulus):
+            for addend2 in range(modulus):
+                test_circuit = buildTestModAdderCircuit(addend2, addend1, modulus, bits_per_number)
+
+                start_time = time.time()
+                task = device.run(test_circuit, shots=1)
+                end_time = time.time()
+
+                for key in task.result().measurement_counts:
+                    result = getNumberFromBitString(key, bits_per_number, bits_per_number)
+                    expected = ((addend1 + addend2) % modulus)
+                    print(f"Equation: ({addend1} + {addend2}) % {modulus}")
+                    print(f"Result: {result}, Expected: {expected}, Accurate: {result == expected}")
+
+                print(f"Took {end_time - start_time} seconds")
+
 """
 Method `ModMultiplier` represents a modular multiplier with a pre-determined
 input for an multiplicand, which returns the remainder of the multiplication
 modulo a pre-determined modulus.
 
 Args:
+    control_qubit (QubitInput): The qubit representing whether the
+                                multiplication should occur.  A value of 1 sets
+                                the `product` gate to an effective value of
+                                (multiplier * multiplicand_int) % modulus_int,
+                                and a value of 0 sets the `product` gate to an
+                                effective value of multiplier.
+
     multiplier (QubitSetInput): The first value representing the multiplier.
                                 These qubits are potentially swapped with the
                                 product qubits.
@@ -368,7 +312,7 @@ Args:
                         will return these values to 0 as well.  Should have
                         one more qubit than `product` within its set.
 
-    modulus_int (int): An integer value of the modulus.
+    modulus_int (int): The integer value of the modulus.
 
     modulus_bits (List[int]): A list of int's representing the bit values of
                               the modulus.
@@ -390,15 +334,9 @@ Args:
                                   multiplicand.  These values should be
                                   initialized to 0.  This method will return
                                   these values to 0 as well.
-
-    control_qubit (QubitInput): The qubit representing whether the
-                                multiplication should occur.  A value of 1 sets
-                                the `product` gate to an effective value of
-                                (multiplier * multiplicand_int) % modulus_int,
-                                and a value of 0 sets the `product` gate to an
-                                effective value of multiplier.
 """
 def ModMultiplier(
+        control_qubit: QubitInput,
         multiplier: QubitSetInput,
         product: QubitSetInput,
         carry: QubitSetInput,
@@ -407,15 +345,15 @@ def ModMultiplier(
         modulus: QubitSetInput,
         modulus_overflow_qubit: QubitInput,
         multiplicand_int: int,
-        multiplicand: QubitSetInput,
-        control_qubit: QubitInput
+        multiplicand: QubitSetInput
 ) -> Circuit:
     circuit = Circuit()
 
     shift_factor = 1
-    for multiplier_idx in range(len(multiplier)):
+    bits_per_number = len(multiplier)
+    for multiplier_idx in range(bits_per_number):
         multiplicand_mod_int = (multiplicand_int * shift_factor) % modulus_int
-        multiplicand_mod_bits = getNumberAsBits(multiplicand_mod_int)
+        multiplicand_mod_bits = getNumberAsBits(multiplicand_mod_int, bits_per_number)
 
         for multiplicand_mod_idx in range(len(multiplicand_mod_bits)):
             multiplicand_mod_bit = multiplicand_mod_bits[multiplicand_mod_idx]
@@ -460,12 +398,12 @@ def ModMultiplier(
     return circuit
 
 def buildTestModMultiplierCircuit(multiplicand_int, multiplier_int, modulus_int, bits_per_number):
-    multiplier_bits = getNumberAsBits(multiplier_int)
+    multiplier_bits = getNumberAsBits(multiplier_int, bits_per_number)
 
     product_int = 0
-    product_bits = getNumberAsBits(product_int)
+    product_bits = getNumberAsBits(product_int, bits_per_number)
 
-    modulus_bits = getNumberAsBits(modulus_int)
+    modulus_bits = getNumberAsBits(modulus_int, bits_per_number)
 
     circuit = Circuit()
 
@@ -496,6 +434,7 @@ def buildTestModMultiplierCircuit(multiplicand_int, multiplier_int, modulus_int,
     bit_index += 1
 
     circuit.add(ModMultiplier(
+            multiplier_enabled,
             multiplier,
             product,
             carry,
@@ -504,8 +443,7 @@ def buildTestModMultiplierCircuit(multiplicand_int, multiplier_int, modulus_int,
             modulus,
             modulus_overflow,
             multiplicand_int,
-            multiplicand,
-            multiplier_enabled
+            multiplicand
     ))
 
     return circuit
@@ -549,7 +487,7 @@ Args:
                         will return these values to 0 as well.  Should have
                         one more qubit than `power` within its set.
 
-    modulus_int (int): An integer value of the modulus.
+    modulus_int (int): The integer value of the modulus.
 
     modulus_bits (List[int]): A list of int's representing the bit values of
                               the modulus.
@@ -595,6 +533,7 @@ def ModExponentiation(
     for exponent_idx in range(len(exponent)):
         base_mod_int = (base_int ** (2 ** exponent_idx)) % modulus_int
         addToCircuit(circuit, ModMultiplier(
+                exponent[exponent_idx],
                 current_multiplier,
                 current_product,
                 carry,
@@ -603,8 +542,7 @@ def ModExponentiation(
                 modulus,
                 modulus_overflow_qubit,
                 base_mod_int,
-                base,
-                exponent[exponent_idx]
+                base
         ))
 
         next_product = current_multiplier
@@ -613,6 +551,7 @@ def ModExponentiation(
 
         base_inv_mod_int = modInverse(base_mod_int, modulus_int)
         addToCircuit(circuit, invertInstructions(ModMultiplier(
+                exponent[exponent_idx],
                 current_multiplier,
                 current_product,
                 carry,
@@ -621,22 +560,21 @@ def ModExponentiation(
                 modulus,
                 modulus_overflow_qubit,
                 base_inv_mod_int,
-                base,
-                exponent[exponent_idx]
+                base
         ).instructions))
 
     return circuit
 
 def buildTestModExponentiationCircuit(base_int, exponent_int, modulus_int, bits_per_number):
-    base_bits = getNumberAsBits(base_int)
-    exponent_bits = getNumberAsBits(exponent_int)
-    modulus_bits = getNumberAsBits(modulus_int)
+    base_bits = getNumberAsBits(base_int, bits_per_number)
+    exponent_bits = getNumberAsBits(exponent_int, bits_per_number)
+    modulus_bits = getNumberAsBits(modulus_int, bits_per_number)
 
     multiplier_int = 1
-    multiplier_bits = getNumberAsBits(multiplier_int)
+    multiplier_bits = getNumberAsBits(multiplier_int, bits_per_number)
 
     product_int = 0
-    product_bits = getNumberAsBits(product_int)
+    product_bits = getNumberAsBits(product_int, bits_per_number)
 
     circuit = Circuit()
 
@@ -681,17 +619,7 @@ def buildTestModExponentiationCircuit(base_int, exponent_int, modulus_int, bits_
 
     return circuit
 
-bits_per_number = 3
-
-# Testing ModAdder
-# test_circuit = buildTestModAdderCircuit(2, 3, 7, bits_per_number)
-
-# Testing ModMultiplier
-# test_circuit = buildTestModMultiplierCircuit(2, 3, 7, bits_per_number)
-# testAllInputsModMultiplier()
-
-# Testing ModExponentiation
-def testAllExponentsModExponentiation(base, modulus):
+def testAllExponentsModExponentiation(base, modulus, bits_per_number):
     for exponent in range(2 ** bits_per_number):
         test_circuit = buildTestModExponentiationCircuit(base, exponent, modulus, bits_per_number)
 
@@ -709,4 +637,15 @@ def testAllExponentsModExponentiation(base, modulus):
 
         print(f"Took {end_time - start_time} seconds")
 
-testAllExponentsModExponentiation(2, 7)
+bits_per_number = 3
+
+# Testing ModAdder
+# test_circuit = buildTestModAdderCircuit(2, 3, 7, bits_per_number)
+# testAllInputsModAdder(bits_per_number)
+
+# Testing ModMultiplier
+# test_circuit = buildTestModMultiplierCircuit(2, 3, 7, bits_per_number)
+testAllInputsModMultiplier(bits_per_number)
+
+# Testing ModExponentiation
+# testAllExponentsModExponentiation(2, 7, bits_per_number)
