@@ -25,3 +25,41 @@ To see a list of options available from the command line, use:
 ```shell
   python shors.py --help
 ```
+
+## Running tests
+
+To evaluate the accuracy of AWS Braket circuits, run either of the following:
+
+```sh
+mkdir -p logs
+python aws/shors.test.py | tee logs/shors.test.py.stdout
+```
+
+```sh
+mkdir -p logs
+python aws/shors_fourier.test.py | tee logs/shors_fourier.test.py.stdout
+```
+
+To measure test success:
+
+```sh
+grep -B 2 Accurate logs/shors.test.py.stdout | grep -B 2 False
+```
+
+```sh
+grep -B 2 Accurate logs/shors_fourier.test.py.stdout | grep -B 2 False
+```
+
+Running these commands together:
+
+```sh
+mkdir -p logs
+python aws/shors.test.py | tee logs/shors.test.py.stdout
+grep -B 2 Accurate logs/shors.test.py.stdout | grep -B 2 False
+```
+
+```sh
+mkdir -p logs
+python aws/shors_fourier.test.py | tee logs/shors_fourier.test.py.stdout
+grep -B 2 Accurate logs/shors_fourier.test.py.stdout | grep -B 2 False
+```

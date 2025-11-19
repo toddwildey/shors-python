@@ -59,7 +59,7 @@ def Carry(
     circuit = Circuit()
     addToCircuit(circuit, Gate.CCNot.ccnot(control1, control2, target))
     addToCircuit(circuit, Gate.CNot.cnot(control1, control2))
-    addToCircuit(circuit, Gate.CCNot.ccnot(overflow_prev, control2, target))
+    addToCircuit(circuit, Gate.CCNot.ccnot(control2, overflow_prev, target))
     return circuit
 
 """
@@ -272,7 +272,7 @@ def testAllInputsModAdder(bits_per_number = 3):
     for modulus in range(3, (2 ** bits_per_number) - 1):
         for addend1 in range(modulus):
             for addend2 in range(modulus):
-                test_circuit = buildTestModAdderCircuit(addend2, addend1, modulus, bits_per_number)
+                test_circuit = buildTestModAdderCircuit(addend1, addend2, modulus, bits_per_number)
 
                 start_time = time.time()
                 task = device.run(test_circuit, shots=1)
@@ -624,7 +624,7 @@ def testAllExponentsModExponentiation(base, modulus, bits_per_number):
         test_circuit = buildTestModExponentiationCircuit(base, exponent, modulus, bits_per_number)
 
         start_time = time.time()
-        task = device.run(test_circuit, shots=1)
+        task = device.run(test_circuit, shots=1000)
         end_time = time.time()
 
         print(task.result().measurement_counts)
@@ -637,15 +637,16 @@ def testAllExponentsModExponentiation(base, modulus, bits_per_number):
 
         print(f"Took {end_time - start_time} seconds")
 
-bits_per_number = 3
+if __name__ == '__main__':
+    bits_per_number = 3
 
-# Testing ModAdder
-# test_circuit = buildTestModAdderCircuit(2, 3, 7, bits_per_number)
-# testAllInputsModAdder(bits_per_number)
+    # Testing ModAdder
+    # test_circuit = buildTestModAdderCircuit(2, 3, 7, bits_per_number)
+    testAllInputsModAdder(bits_per_number)
 
-# Testing ModMultiplier
-# test_circuit = buildTestModMultiplierCircuit(2, 3, 7, bits_per_number)
-testAllInputsModMultiplier(bits_per_number)
+    # Testing ModMultiplier
+    # test_circuit = buildTestModMultiplierCircuit(2, 3, 7, bits_per_number)
+    # testAllInputsModMultiplier(bits_per_number)
 
-# Testing ModExponentiation
-# testAllExponentsModExponentiation(2, 7, bits_per_number)
+    # Testing ModExponentiation
+    # testAllExponentsModExponentiation(2, 7, bits_per_number)

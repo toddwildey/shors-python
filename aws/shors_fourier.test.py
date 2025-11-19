@@ -1,6 +1,7 @@
 # AWS imports: Import Braket SDK modules
 import boto3
 import math
+import os
 import time
 
 from typing import Iterable, List
@@ -526,6 +527,8 @@ def buildTestFourierShorsCircuit(
 
     return circuit, exponent, multiplier
 
+SHOTS = int(os.environ['SHOTS']) if os.environ.get('SHOTS', False) else 128
+
 def testFourierShors(bits_per_number):
     modulus_int = 15
     base_int = 2
@@ -539,7 +542,7 @@ def testFourierShors(bits_per_number):
     bits_per_number = bits_per_number + 1
 
     start_time = time.time()
-    task = device.run(test_circuit, shots=128)
+    task = device.run(test_circuit, shots = SHOTS)
     end_time = time.time()
 
     print(task.result().measurement_counts)
