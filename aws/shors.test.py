@@ -25,7 +25,10 @@ from utils import \
 from shors import \
     Carry, \
     Sum, \
-    Adder
+    Adder, \
+    ModAdder, \
+    ModMultiplier, \
+    ModExponentiation
 
 device = LocalSimulator()
 
@@ -126,12 +129,210 @@ def testAllInputsAdder(bits_per_number = 3):
 
             print(f"Took {end_time - start_time} seconds")
 
-bits_per_number = 3
+def buildTestModAdderCircuit(addend1_int, addend2_int, modulus_int, bits_per_number):
+    addend1_bits = getNumberAsBits(addend1_int, bits_per_number)
+    addend2_bits = getNumberAsBits(addend2_int, bits_per_number)
+    modulus_bits = getNumberAsBits(modulus_int, bits_per_number)
 
-# Testing `Carry`
-# Doesn't pass all tests, because it must be used in conjunction with a `Sum` circuit in an overall `Adder` circuit
-# testAllInputsCarry(1)
+    circuit = Circuit()
 
-# Testing `Adder`
-testAllInputsAdder(bits_per_number)
+    bit_index = 0
+    addend1 = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, addend1_bits, bit_index)
+    bit_index += bits_per_number
 
+    addend2 = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, addend2_bits, bit_index)
+    bit_index += bits_per_number
+
+    carry = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number + 1)])
+    bit_index += bits_per_number + 1
+
+    modulus = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, modulus_bits, bit_index)
+    bit_index += bits_per_number
+
+    modulus_overflow = Qubit(bit_index)
+    bit_index += 1
+
+    circuit.add(ModAdder(addend1, addend2, carry, modulus_bits, modulus, modulus_overflow))
+
+    return circuit
+
+def testAllInputsModAdder(bits_per_number = 3):
+    for modulus in range(3, (2 ** bits_per_number) - 1):
+        for addend1 in range(modulus):
+            for addend2 in range(modulus):
+                test_circuit = buildTestModAdderCircuit(addend1, addend2, modulus, bits_per_number)
+
+                start_time = time.time()
+                task = device.run(test_circuit, shots=1)
+                end_time = time.time()
+
+                for key in task.result().measurement_counts:
+                    result = getNumberFromBitString(key, bits_per_number, bits_per_number)
+                    expected = ((addend1 + addend2) % modulus)
+                    print(f"Equation: ({addend1} + {addend2}) % {modulus}")
+                    print(f"Result: {result}, Expected: {expected}, Accurate: {result == expected}")
+
+                print(f"Took {end_time - start_time} seconds")
+
+def buildTestModMultiplierCircuit(multiplicand_int, multiplier_int, modulus_int, bits_per_number):
+    multiplier_bits = getNumberAsBits(multiplier_int, bits_per_number)
+
+    product_int = 0
+    product_bits = getNumberAsBits(product_int, bits_per_number)
+
+    modulus_bits = getNumberAsBits(modulus_int, bits_per_number)
+
+    circuit = Circuit()
+
+    bit_index = 0
+    multiplier = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, multiplier_bits, bit_index)
+    bit_index += bits_per_number
+
+    product = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, product_bits, bit_index)
+    bit_index += bits_per_number
+
+    carry = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number + 1)])
+    bit_index += bits_per_number + 1
+
+    modulus = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, modulus_bits, bit_index)
+    bit_index += bits_per_number
+
+    modulus_overflow = Qubit(bit_index)
+    bit_index += 1
+
+    multiplicand = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    bit_index += bits_per_number
+
+    multiplier_enabled = Qubit(bit_index)
+    circuit.x(multiplier_enabled)
+    bit_index += 1
+
+    circuit.add(ModMultiplier(
+            multiplier_enabled,
+            multiplier,
+            product,
+            carry,
+            modulus_int,
+            modulus_bits,
+            modulus,
+            modulus_overflow,
+            multiplicand_int,
+            multiplicand
+    ))
+
+    return circuit
+
+def testAllInputsModMultiplier(bits_per_number = 3):
+    for modulus in range(3, (2 ** bits_per_number) - 1):
+        for multiplier in range((2 ** bits_per_number) - 1):
+            for multiplicand in range((2 ** bits_per_number) - 1):
+                test_circuit = buildTestModMultiplierCircuit(multiplicand, multiplier, modulus, bits_per_number)
+
+                start_time = time.time()
+                task = device.run(test_circuit, shots=1)
+                end_time = time.time()
+
+                for key in task.result().measurement_counts:
+                    result = getNumberFromBitString(key, bits_per_number, bits_per_number)
+                    expected = ((multiplier * multiplicand) % modulus)
+                    print(f"Equation: ({multiplier} * {multiplicand}) % {modulus}")
+                    print(f"Result: {result}, Expected: {expected}, Accurate: {result == expected}")
+
+                print(f"Took {end_time - start_time} seconds")
+
+def buildTestModExponentiationCircuit(base_int, exponent_int, modulus_int, bits_per_number):
+    base_bits = getNumberAsBits(base_int, bits_per_number)
+    exponent_bits = getNumberAsBits(exponent_int, bits_per_number)
+    modulus_bits = getNumberAsBits(modulus_int, bits_per_number)
+
+    multiplier_int = 1
+    multiplier_bits = getNumberAsBits(multiplier_int, bits_per_number)
+
+    product_int = 0
+    product_bits = getNumberAsBits(product_int, bits_per_number)
+
+    circuit = Circuit()
+
+    bit_index = 0
+    multiplier = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, multiplier_bits, bit_index)
+    bit_index += bits_per_number
+
+    product = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, product_bits, bit_index)
+    bit_index += bits_per_number
+
+    carry = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number + 1)])
+    bit_index += bits_per_number + 1
+
+    modulus = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, modulus_bits, bit_index)
+    bit_index += bits_per_number
+
+    modulus_overflow = Qubit(bit_index)
+    bit_index += 1
+
+    base = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    bit_index += bits_per_number
+
+    exponent = QubitSet([idx for idx in range(bit_index, bit_index + bits_per_number)])
+    setCircuitBits(circuit, exponent_bits, bit_index)
+    bit_index += bits_per_number
+
+    circuit.add(ModExponentiation(
+            multiplier,
+            product,
+            carry,
+            modulus_int,
+            modulus_bits,
+            modulus,
+            modulus_overflow,
+            base_int,
+            base,
+            exponent
+    ))
+
+    return circuit
+
+def testAllExponentsModExponentiation(base, modulus, bits_per_number):
+    for exponent in range(2 ** bits_per_number):
+        test_circuit = buildTestModExponentiationCircuit(base, exponent, modulus, bits_per_number)
+
+        start_time = time.time()
+        task = device.run(test_circuit, shots=1000)
+        end_time = time.time()
+
+        print(task.result().measurement_counts)
+
+        for key in task.result().measurement_counts:
+            result = getNumberFromBitString(key, bits_per_number, bits_per_number)
+            expected = ((base ** exponent) % modulus)
+            print(f"Equation: ({base} ** {exponent}) % {modulus}")
+            print(f"Result: {result}, Expected: {expected}, Accurate: {result == expected}")
+
+        print(f"Took {end_time - start_time} seconds")
+
+if __name__ == '__main__':
+    bits_per_number = 3
+
+    # Testing `Carry`
+    # Doesn't pass all tests, because it must be used in conjunction with a `Sum` circuit in an overall `Adder` circuit
+    # testAllInputsCarry(1)
+
+    # Testing `Adder`
+    testAllInputsAdder(bits_per_number)
+
+    # Testing ModAdder
+    # testAllInputsModAdder(bits_per_number)
+
+    # Testing ModMultiplier
+    # testAllInputsModMultiplier(bits_per_number)
+
+    # Testing ModExponentiation
+    # testAllExponentsModExponentiation(2, 7, bits_per_number)
